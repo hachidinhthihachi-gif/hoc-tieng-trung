@@ -1,55 +1,36 @@
 """
-Lặp Từ Vựng Tiếng Trung - chạy bằng Python, tích hợp Đoạn Đối Thoại 4-6 câu.
+Lặp Từ Vựng Tiếng Trung - chạy bằng Python, không tốn token Claude.
+
+Cài 1 lần:   pip install pypinyin jieba
+Chạy:        python vocab_app.py
+Rồi mở:      http://localhost:8000   (Chrome hoặc Edge)
+Dùng trên điện thoại cùng Wi-Fi:  python vocab_app.py --lan   (rồi mở http://<IP máy tính>:8000)
 """
 import argparse
 import json
 import os
-import random
 import re
 import socket
 import urllib.request
+from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 import jieba
 from pypinyin import Style, pinyin
+
+from pathlib import Path
 
 try:  # chietu.json nằm cùng thư mục với file này
     CHIETU = json.loads(Path(__file__).with_name("chietu.json").read_text(encoding="utf-8"))
 except Exception:
     CHIETU = {}
-
 CJK = re.compile(r"[\u4e00-\u9fff]")
 _cache = {}
-last_error = ""
 
-# Danh sách bài hội thoại mẫu dự phòng
-SAMPLE_DIALOGUES = [
-    {
-        "topic": "Chào hỏi & Gặp gỡ",
-        "lines": [
-            {"speaker": "A", "zh": "你好！很高兴认识你。", "vi": "Xin chào! Rất vui được quen biết bạn."},
-            {"speaker": "B", "zh": "你好！我也很高兴认识你。", "vi": "Chào bạn! Tôi cũng rất vui được quen biết bạn."},
-            {"speaker": "A", "zh": "你今天忙吗？", "vi": "Hôm nay bạn có bận không?"},
-            {"speaker": "B", "zh": "我不忙，你呢？", "vi": "Tôi không bận, còn bạn thì sao?"},
-            {"speaker": "A", "zh": "我们一起去喝茶吧！", "vi": "Chúng ta cùng đi uống trà nhé!"},
-            {"speaker": "B", "zh": "太好了，我们走吧！", "vi": "Tốt quá, chúng ta đi thôi!"}
-        ]
-    },
-    {
-        "topic": "Thời tiết & Sinh hoạt",
-        "lines": [
-            {"speaker": "A", "zh": "今天天气怎么样？", "vi": "Thời tiết hôm nay thế nào?"},
-            {"speaker": "B", "zh": "今天天气很温和，不冷也不热。", "vi": "Thời tiết hôm nay rất ấm áp, không lạnh cũng không nóng."},
-            {"speaker": "A", "zh": "太好了，我想出去拿东西。", "vi": "Tốt quá, tôi muốn ra ngoài lấy đồ."},
-            {"speaker": "B", "zh": "你看，外面天很蓝。", "vi": "Bạn xem, bên ngoài trời rất xanh."},
-            {"speaker": "A", "zh": "那我们现在就出发吧。", "vi": "Vậy bây giờ chúng ta xuất phát thôi."},
-            {"speaker": "B", "zh": "好的，拿好钥匙。", "vi": "Được rồi, cầm chắc chìa khóa nhé."}
-        ]
-    }
-]
+
+last_error = ""
 
 
 def _get_json(url):
@@ -59,7 +40,7 @@ def _get_json(url):
 
 
 def tr(text, src, dst):
-    """Dịch: thử Google (gtx) trước, lỗi thì thử MyMemory."""
+    """Dịch: thử Google (gtx) trước, lỗi thì thử MyMemory. Có nhớ kết quả."""
     global last_error
     key = (text, src, dst)
     if key in _cache:
@@ -71,12 +52,14 @@ def tr(text, src, dst):
         out = "".join(part[0] for part in d[0] if part[0]).strip()
     except Exception as e:
         last_error = f"Google: {e}"
+        print("  ! Lỗi dịch (Google):", e)
     if not out:
         try:
             d = _get_json(f"https://api.mymemory.translated.net/get?q={q}&langpair={src}|{dst}")
             out = (d.get("responseData", {}).get("translatedText") or "").strip()
         except Exception as e:
             last_error = f"MyMemory: {e}"
+            print("  ! Lỗi dịch (MyMemory):", e)
     if out:
         _cache[key] = out
     return out
@@ -87,6 +70,7 @@ def py(text):
 
 
 def lookup(q):
+    """Gõ hán tự -> pinyin + nghĩa Việt. Gõ tiếng Việt -> ra hán tự tương ứng."""
     if CJK.search(q):
         hanzi, meaning = q, tr(q, "zh-CN", "vi")
     else:
@@ -99,6 +83,7 @@ def lookup(q):
 
 
 def translate(text):
+    """Câu Việt <-> Trung + pinyin + bảng từ vựng (tách từ bằng jieba)."""
     if CJK.search(text):
         zh, vi = text, tr(text, "zh-CN", "vi")
     else:
@@ -117,17 +102,228 @@ def translate(text):
     }
 
 
-def generate_dialogue(words_str=""):
-    sample = random.choice(SAMPLE_DIALOGUES)
-    res_lines = []
-    for line in sample["lines"]:
-        res_lines.append({
-            "speaker": line["speaker"],
-            "zh": line["zh"],
-            "pinyin": py(line["zh"]),
-            "vi": line["vi"]
-        })
-    return {"topic": sample["topic"], "dialogue": res_lines}
+DIALOGUES = [
+ {
+  "topic": "Chào hỏi & làm quen",
+  "lines": [
+   {
+    "speaker": "A",
+    "zh": "你好！很高兴认识你。",
+    "vi": "Xin chào! Rất vui được quen bạn."
+   },
+   {
+    "speaker": "B",
+    "zh": "你好！我也很高兴认识你。",
+    "vi": "Chào bạn! Tôi cũng rất vui được quen bạn."
+   },
+   {
+    "speaker": "A",
+    "zh": "你叫什么名字？",
+    "vi": "Bạn tên là gì?"
+   },
+   {
+    "speaker": "B",
+    "zh": "我叫小明，你呢？",
+    "vi": "Tôi tên Tiểu Minh, còn bạn?"
+   },
+   {
+    "speaker": "A",
+    "zh": "我叫小红。你是哪国人？",
+    "vi": "Tôi tên Tiểu Hồng. Bạn là người nước nào?"
+   },
+   {
+    "speaker": "B",
+    "zh": "我是越南人。",
+    "vi": "Tôi là người Việt Nam."
+   }
+  ]
+ },
+ {
+  "topic": "Thời tiết",
+  "lines": [
+   {
+    "speaker": "A",
+    "zh": "今天天气怎么样？",
+    "vi": "Thời tiết hôm nay thế nào?"
+   },
+   {
+    "speaker": "B",
+    "zh": "今天天气很好，不冷也不热。",
+    "vi": "Thời tiết hôm nay rất đẹp, không lạnh cũng không nóng."
+   },
+   {
+    "speaker": "A",
+    "zh": "太好了！我们去公园走走吧。",
+    "vi": "Tốt quá! Chúng ta ra công viên đi dạo nhé."
+   },
+   {
+    "speaker": "B",
+    "zh": "好啊，我去拿一下水。",
+    "vi": "Được thôi, tôi đi lấy chút nước."
+   },
+   {
+    "speaker": "A",
+    "zh": "明天会下雨吗？",
+    "vi": "Ngày mai có mưa không?"
+   },
+   {
+    "speaker": "B",
+    "zh": "听说明天会下雨，所以今天要多玩一会儿。",
+    "vi": "Nghe nói ngày mai sẽ mưa, nên hôm nay phải chơi thêm một lát."
+   }
+  ]
+ },
+ {
+  "topic": "Gọi đồ ở quán cà phê",
+  "lines": [
+   {
+    "speaker": "A",
+    "zh": "你好，请问喝点什么？",
+    "vi": "Xin chào, bạn muốn uống gì ạ?"
+   },
+   {
+    "speaker": "B",
+    "zh": "我要一杯咖啡，谢谢。",
+    "vi": "Cho tôi một ly cà phê, cảm ơn."
+   },
+   {
+    "speaker": "A",
+    "zh": "要热的还是冰的？",
+    "vi": "Nóng hay đá ạ?"
+   },
+   {
+    "speaker": "B",
+    "zh": "冰的。多少钱？",
+    "vi": "Đá. Bao nhiêu tiền?"
+   },
+   {
+    "speaker": "A",
+    "zh": "一共三十元。",
+    "vi": "Tổng cộng ba mươi tệ."
+   },
+   {
+    "speaker": "B",
+    "zh": "给你钱，谢谢！",
+    "vi": "Gửi bạn tiền, cảm ơn!"
+   }
+  ]
+ },
+ {
+  "topic": "Hỏi đường",
+  "lines": [
+   {
+    "speaker": "A",
+    "zh": "请问，火车站怎么走？",
+    "vi": "Xin hỏi, đi đến ga tàu thế nào?"
+   },
+   {
+    "speaker": "B",
+    "zh": "一直走，然后在第二个路口左转。",
+    "vi": "Đi thẳng, rồi rẽ trái ở ngã tư thứ hai."
+   },
+   {
+    "speaker": "A",
+    "zh": "远吗？",
+    "vi": "Có xa không?"
+   },
+   {
+    "speaker": "B",
+    "zh": "不远，走路大约十分钟。",
+    "vi": "Không xa, đi bộ khoảng mười phút."
+   },
+   {
+    "speaker": "A",
+    "zh": "谢谢你！",
+    "vi": "Cảm ơn bạn!"
+   },
+   {
+    "speaker": "B",
+    "zh": "不客气。",
+    "vi": "Không có gì."
+   }
+  ]
+ },
+ {
+  "topic": "Kế hoạch cuối tuần",
+  "lines": [
+   {
+    "speaker": "A",
+    "zh": "周末你有什么计划？",
+    "vi": "Cuối tuần bạn có kế hoạch gì?"
+   },
+   {
+    "speaker": "B",
+    "zh": "我想在家学汉语，你呢？",
+    "vi": "Tôi muốn ở nhà học tiếng Trung, còn bạn?"
+   },
+   {
+    "speaker": "A",
+    "zh": "我打算和朋友去看电影。",
+    "vi": "Tôi định đi xem phim với bạn bè."
+   },
+   {
+    "speaker": "B",
+    "zh": "你喜欢看什么电影？",
+    "vi": "Bạn thích xem phim gì?"
+   },
+   {
+    "speaker": "A",
+    "zh": "我喜欢喜剧片，很轻松。",
+    "vi": "Tôi thích phim hài, rất nhẹ nhàng."
+   },
+   {
+    "speaker": "B",
+    "zh": "下次我也想一起去。",
+    "vi": "Lần sau tôi cũng muốn đi cùng."
+   }
+  ]
+ },
+ {
+  "topic": "Mua sắm",
+  "lines": [
+   {
+    "speaker": "A",
+    "zh": "这件衣服多少钱？",
+    "vi": "Cái áo này bao nhiêu tiền?"
+   },
+   {
+    "speaker": "B",
+    "zh": "一百二十块。",
+    "vi": "Một trăm hai mươi tệ."
+   },
+   {
+    "speaker": "A",
+    "zh": "太贵了，可以便宜一点吗？",
+    "vi": "Đắt quá, có thể rẻ hơn chút không?"
+   },
+   {
+    "speaker": "B",
+    "zh": "那给你一百块吧。",
+    "vi": "Vậy tính cho bạn một trăm nhé."
+   },
+   {
+    "speaker": "A",
+    "zh": "好，我要这件。",
+    "vi": "Được, tôi lấy cái này."
+   },
+   {
+    "speaker": "B",
+    "zh": "谢谢，欢迎下次再来。",
+    "vi": "Cảm ơn, hoan nghênh lần sau lại đến."
+   }
+  ]
+ }
+]
+try:  # muốn thêm bài riêng: tạo hoithoai.json cùng thư mục (cùng định dạng)
+    DIALOGUES += json.loads(Path(__file__).with_name("hoithoai.json").read_text(encoding="utf-8"))
+except Exception:
+    pass
+
+
+def get_dialogue(i):
+    d = DIALOGUES[i % len(DIALOGUES)]
+    return {"index": i % len(DIALOGUES), "topic": d["topic"],
+            "dialogue": [dict(l, pinyin=py(l["zh"])) for l in d["lines"]]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -146,18 +342,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(PAGE, "text/html")
         elif u.path == "/api/lookup" and q:
             self._send(json.dumps(lookup(q), ensure_ascii=False), "application/json")
+        elif u.path == "/api/dialogue":
+            self._send(json.dumps(get_dialogue(int(q) if q.isdigit() else 0), ensure_ascii=False), "application/json")
         elif u.path == "/api/translate" and q:
             self._send(json.dumps(translate(q), ensure_ascii=False), "application/json")
-        elif u.path == "/api/dialogue":
-            self._send(json.dumps(generate_dialogue(q), ensure_ascii=False), "application/json")
         else:
             self.send_error(404)
 
-    def log_message(self, *a):
+    def log_message(self, *a):  # tắt log rối mắt
         pass
 
 
-PAGE = """<!DOCTYPE html>
+PAGE = r"""<!DOCTYPE html>
 <html lang="vi"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lặp Từ Vựng Tiếng Trung</title>
@@ -195,19 +391,21 @@ button.stop{padding:14px 18px;font-size:1rem;border-radius:10px;border:1px solid
 .story-box{padding:10px 12px;border-radius:10px;background:var(--bg);border-left:3px solid var(--accent);font-size:.92rem;line-height:1.65}
 .hz{color:var(--accent);font-weight:800}
 .decomp+.decomp{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.d-item{display:flex;gap:10px;margin-bottom:10px;align-items:flex-start}
+.d-badge{background:var(--accent);color:var(--accent-ink);padding:3px 9px;border-radius:6px;font-weight:700;font-size:.85rem}
+.d-box{flex:1;background:var(--bg);padding:10px 12px;border-radius:10px;border:1px solid var(--line)}
+.d-zh{font-size:1.15rem;font-weight:600}.d-py{color:var(--accent);font-size:.85rem;font-family:monospace}
+.d-vi{color:var(--sub);font-size:.88rem;margin-top:2px}.hide .d-vi,.hide .d-py{visibility:hidden}
+.d-play{border:none;background:none;cursor:pointer;font-size:1rem}
 .vocab-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .vocab-row:last-child{border-bottom:none}
 .vocab-play{flex-shrink:0;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--accent);font-size:1.05rem;cursor:pointer}
 .vocab-info b{font-size:1.1rem}
 .vpinyin{color:var(--accent);font-family:monospace;margin-left:6px;font-size:.9rem}
 .vmeaning{color:var(--sub);font-size:.85rem;margin-top:2px}
-
-.dialogue-item{display:flex;gap:10px;margin-bottom:12px;align-items:flex-start}
-.speaker-badge{background:var(--accent);color:var(--accent-ink);padding:4px 8px;border-radius:6px;font-weight:bold;font-size:.85rem}
-.dialogue-content{flex:1;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line)}
-.dialogue-zh{font-size:1.1rem;font-weight:600}
-.dialogue-py{color:var(--accent);font-size:.85rem;font-family:monospace}
-.dialogue-vi{color:var(--sub);font-size:.85rem;margin-top:2px}
+.quiz-opt{padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:1rem;text-align:left;cursor:pointer}
+.quiz-opt.correct{background:#dcfce7;border-color:#22c55e;color:#14532d}
+.quiz-opt.wrong{background:#fee2e2;border-color:#ef4444;color:#7f1d1d}
 </style></head>
 <body><div class="wrap">
 <h1>🔁 Lặp Từ Vựng Tiếng Trung</h1>
@@ -232,6 +430,7 @@ button.stop{padding:14px 18px;font-size:1rem;border-radius:10px;border:1px solid
   <div class="playbar"><button class="main" id="play">▶️ Phát</button><button class="stop" id="stop">⏹ Dừng</button></div>
   <div class="count" id="count"></div><div class="status" id="status">Sẵn sàng</div>
 </div>
+<p class="hint">Mẹo: chọn giọng đọc có "zh" (tiếng Trung) trong mục "Giọng đọc" để phát âm đúng.</p>
 
 <div class="card">
   <label for="sentence">📝 Dịch câu (Việt ⇄ Trung) + bảng từ vựng</label>
@@ -246,12 +445,28 @@ button.stop{padding:14px 18px;font-size:1rem;border-radius:10px;border:1px solid
 </div>
 
 <div class="card">
-  <label>💬 Đoạn đối thoại mẫu (4–6 câu)</label>
-  <div id="dialogueTopic" style="font-weight:700;margin-bottom:12px;color:var(--accent)">Chủ đề: Luyện tập</div>
-  <div id="dialogueList"></div>
-  <button class="main" id="genDialogueBtn" type="button" style="margin-top:12px;width:100%">🔄 Đổi đoạn đối thoại khác</button>
+  <label>💬 Đoạn đối thoại (6 câu)</label>
+  <div id="dTopic" style="font-weight:700;color:var(--accent);margin-bottom:12px"></div>
+  <div id="dList"></div>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    <button class="main" id="dAll" type="button">🔊 Nghe cả đoạn</button>
+    <button class="stop" id="dHide" type="button">🙈 Ẩn nghĩa</button>
+  </div>
+  <button class="stop" id="dNext" type="button" style="width:100%;margin-top:10px">🔄 Đoạn khác</button>
 </div>
 
+<div class="card" id="quizCard" style="display:none">
+  <label style="margin-bottom:14px">🎯 Kiểm tra từ đã học</label>
+  <div id="quizIntro" style="font-size:.9rem;color:var(--sub);margin-bottom:14px"></div>
+  <button class="main" id="quizStart" type="button" style="width:100%">Bắt đầu kiểm tra</button>
+  <div id="quizBody" style="display:none">
+    <div style="text-align:center;margin:6px 0 4px;font-size:2rem;font-weight:800" id="qMain"></div>
+    <div style="text-align:center;color:var(--sub);font-family:monospace;margin-bottom:16px" id="qSub"></div>
+    <div id="qOpts" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div id="qFb" style="margin-top:14px;text-align:center;font-weight:700;min-height:1.4em"></div>
+    <button class="main" id="qNext" type="button" style="width:100%;margin-top:14px;display:none">Từ tiếp theo ▶️</button>
+  </div>
+</div>
 </div>
 
 <script>
@@ -259,6 +474,7 @@ const $ = id => document.getElementById(id);
 const wordEl=$('word'), voiceEl=$('voice'), rateEl=$('rate'), repsEl=$('reps'), playBtn=$('play'), statusEl=$('status'), countEl=$('count');
 let voices=[], playing=false, stopRequested=false;
 
+// ---- Giọng đọc + lặp ----
 function loadVoices(){
   const all = speechSynthesis.getVoices();
   voices = all.filter(v => v.lang.toLowerCase().startsWith('zh'));
@@ -268,6 +484,8 @@ function loadVoices(){
 }
 loadVoices();
 if('onvoiceschanged' in speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
+$('dec').onclick = () => repsEl.value = Math.max(1,(+repsEl.value||1)-1);
+$('inc').onclick = () => repsEl.value = Math.min(50,(+repsEl.value||1)+1);
 
 function speakOnce(text, voice, rate){
   return new Promise(res => {
@@ -279,27 +497,156 @@ function speakOnce(text, voice, rate){
 }
 const say = t => { speechSynthesis.cancel(); speakOnce(t, voices[+voiceEl.value]||null, +rateEl.value||1); };
 
-async function loadDialogue(){
+async function playLoop(){
+  const text = wordEl.value.trim();
+  if(!text){ statusEl.textContent='Vui lòng nhập hán tự hoặc cụm từ.'; return; }
+  const total = Math.min(50, Math.max(1, +repsEl.value||1));
+  const speakText = /[\u4e00-\u9fff]/.test(text) ? text : (current && current.hanzi) || text;
+  playing=true; stopRequested=false; playBtn.disabled=true; statusEl.textContent='Đang phát...';
+  for(let i=1;i<=total;i++){
+    if(stopRequested) break;
+    countEl.textContent = i+' / '+total;
+    await speakOnce(speakText, voices[+voiceEl.value]||null, +rateEl.value||1);
+    await new Promise(r => setTimeout(r,350));
+  }
+  playing=false; playBtn.disabled=false;
+  statusEl.textContent = stopRequested ? 'Đã dừng.' : 'Hoàn tất!';
+}
+playBtn.onclick = () => { if(playing) return; speechSynthesis.cancel(); playLoop(); };
+$('stop').onclick = () => { stopRequested=true; speechSynthesis.cancel(); playing=false; playBtn.disabled=false; statusEl.textContent='Đã dừng.'; };
+wordEl.addEventListener('keydown', e => { if(e.key==='Enter') playBtn.click(); });
+
+// ---- Danh sách từ đã học (lưu trong trình duyệt) ----
+let learned = [];
+try{ learned = JSON.parse(localStorage.getItem('learned')||'[]'); }catch(e){}
+function addLearned(hanzi, py, meaning){
+  if(!hanzi || !meaning || meaning==='?' || learned.some(w => w.hanzi===hanzi)) return;
+  learned.push({hanzi, pinyin:py, meaning, icon:'📌'});
+  if(learned.length>60) learned.shift();
+  try{ localStorage.setItem('learned', JSON.stringify(learned)); }catch(e){}
+  refreshQuizIntro();
+}
+function refreshQuizIntro(){
+  if(!learned.length) return;
+  $('quizCard').style.display='block';
+  $('quizIntro').textContent = 'Đã học '+learned.length+' từ. Bấm bắt đầu để tự kiểm tra.';
+}
+refreshQuizIntro();
+
+// ---- Tra pinyin + nghĩa khi gõ ----
+let timer=null, lastQ='', current=null;
+wordEl.addEventListener('input', () => {
+  clearTimeout(timer);
+  const text = wordEl.value.trim();
+  if(!text){ $('meaningBox').style.display='none'; return; }
+  timer = setTimeout(() => lookup(text), 600);
+});
+async function lookup(text){
+  if(text===lastQ) return;
+  lastQ = text;
+  $('meaningBox').style.display='block'; $('pinyin').textContent=''; $('meaning').textContent='Đang tra...';
   try{
-    const r = await (await fetch('/api/dialogue')).json();
-    $('dialogueTopic').textContent = 'Chủ đề: ' + r.topic;
-    $('dialogueList').innerHTML = r.dialogue.map((item) => 
-      '<div class="dialogue-item">'+
-        '<span class="speaker-badge">'+item.speaker+'</span>'+
-        '<div class="dialogue-content">'+
-          '<div class="dialogue-zh">'+item.zh+' <button onclick="say(\''+item.zh.replace(/'/g, "\\'")+'\')" style="border:none;background:none;cursor:pointer">🔊</button></div>'+
-          '<div class="dialogue-py">'+item.pinyin+'</div>'+
-          '<div class="dialogue-vi">'+item.vi+'</div>'+
-        '</div>'+
-      '</div>'
-    ).join('');
-  }catch(e){
-    $('dialogueList').textContent = 'Không thể tải hội thoại.';
+    const r = await (await fetch('/api/lookup?q='+encodeURIComponent(text))).json();
+    if(text !== wordEl.value.trim()) return;
+    current = r;
+    $('pinyin').textContent = r.hanzi+'  '+r.pinyin;
+    $('meaning').textContent = r.error ? '⚠️ Lỗi dịch: '+r.error : (r.meaning || '(không rõ nghĩa)');
+    $('icon').textContent = r.icon;
+    const bd = r.breakdown || [];
+    const hl = t => (t||'').replace(/[\u4e00-\u9fff]/g, m => '<span class="hz">'+m+'</span>');
+    $('breakdown').innerHTML = bd.length ? '<b>📖 Chiết tự:</b>'+bd.map(p =>
+      '<div class="decomp">'+(bd.length>1?'<div style="font-weight:800;font-size:1.5rem">'+p.char+'</div>':'')+
+      '<div class="comp-row">'+(p.components||[]).map(c => '<div class="comp-chip"><div class="cchar">'+c.comp+'</div><div class="cinfo">/'+c.pinyin+'/ '+c.hanviet+'<br><b>'+c.meaning+'</b></div></div>').join('')+'</div>'+
+      (p.story?'<div class="story-box">'+hl(p.story)+'</div>':'')+'</div>').join('') : '';
+    addLearned(r.hanzi, r.pinyin, r.meaning);
+  }catch(e){ $('meaning').textContent='Không tra được nghĩa lúc này.'; }
+}
+
+// ---- Dịch câu + bảng từ vựng ----
+let tWords=[];
+async function doTranslate(){
+  const text = $('sentence').value.trim(); if(!text) return;
+  const btn=$('translateBtn'); btn.disabled=true; btn.textContent='Đang dịch...';
+  $('translateResult').style.display='block';
+  $('tSentence').textContent=''; $('tPinyin').textContent=''; $('tVn').textContent='';
+  $('vocabTable').innerHTML='<div style="color:var(--sub);font-size:.9rem">Đang xử lý...</div>';
+  try{
+    const r = await (await fetch('/api/translate?q='+encodeURIComponent(text))).json();
+    if(r.error){ $('tSentence').textContent='⚠️ Lỗi dịch: '+r.error; $('vocabTable').innerHTML=''; btn.disabled=false; btn.textContent='Dịch'; return; }
+    $('tSentence').textContent = r.chinese; $('tPinyin').textContent = r.pinyin; $('tVn').textContent = '🇻🇳 '+r.vietnamese;
+    tWords = r.words;
+    $('vocabTable').innerHTML = tWords.map((w,i) =>
+      '<div class="vocab-row"><button type="button" class="vocab-play" data-i="'+i+'">🔊</button>'+
+      '<div class="vocab-info"><b>'+w.hanzi+'</b><span class="vpinyin">'+w.pinyin+'</span><div class="vmeaning">'+w.meaning+'</div></div></div>').join('');
+    document.querySelectorAll('.vocab-play').forEach(b => b.onclick = () => say(tWords[+b.dataset.i].hanzi));
+    tWords.forEach(w => addLearned(w.hanzi, w.pinyin, w.meaning));
+  }catch(e){ $('tSentence').textContent='Không dịch được lúc này, thử lại nhé.'; $('vocabTable').innerHTML=''; }
+  btn.disabled=false; btn.textContent='Dịch';
+}
+$('translateBtn').onclick = doTranslate;
+$('sentence').addEventListener('keydown', e => { if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); doTranslate(); } });
+
+// ---- Kiểm tra ----
+const shuffle = a => { a=a.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; };
+const pick = a => a[Math.floor(Math.random()*a.length)];
+let lastType=null;
+function render(opts, correct){
+  $('qOpts').innerHTML='';
+  opts.forEach(o => {
+    const b=document.createElement('button'); b.className='quiz-opt'; b.type='button'; b.textContent=o;
+    b.onclick = () => {
+      document.querySelectorAll('#qOpts button').forEach(x => { x.disabled=true; if(x.textContent===correct) x.classList.add('correct'); });
+      if(o===correct){ $('qFb').textContent='✅ Chính xác!'; $('qFb').style.color='#16a34a'; setTimeout(nextQ,900); }
+      else { b.classList.add('wrong'); $('qFb').textContent='❌ Chưa đúng — đáp án là: '+correct; $('qFb').style.color='#dc2626'; $('qNext').style.display='block'; }
+    };
+    $('qOpts').appendChild(b);
+  });
+}
+function nextQ(){
+  if(learned.length<2){ $('quizBody').style.display='block'; $('qFb').textContent='Cần học ít nhất 2 từ để kiểm tra.'; return; }
+  $('qFb').textContent=''; $('qNext').style.display='none'; $('quizBody').style.display='block'; $('quizStart').style.display='none';
+  const t = pick(['zh2vi','vi2zh','pinyin','listen'].filter(x => x!==lastType)); lastType=t;
+  const w = pick(learned), o = shuffle(learned.filter(x => x!==w)).slice(0,4);
+  if(t==='zh2vi'){ $('qMain').textContent=w.icon+'  '+w.hanzi; $('qSub').textContent=w.pinyin; render(shuffle([w.meaning,...o.map(x=>x.meaning)]), w.meaning); }
+  if(t==='vi2zh'){ const f=x=>x.hanzi+'  ('+x.pinyin+')'; $('qMain').textContent=w.icon+'  '+w.meaning; $('qSub').textContent='(chọn hán tự đúng)'; render(shuffle([f(w),...o.map(f)]), f(w)); }
+  if(t==='pinyin'){ $('qMain').textContent=w.icon+'  '+w.hanzi; $('qSub').textContent='(chọn pinyin đúng)'; render(shuffle([...new Set([w.pinyin,...o.map(x=>x.pinyin)])]), w.pinyin); }
+  if(t==='listen'){
+    $('qMain').innerHTML='🔊 <button type="button" id="again" class="stop" style="font-size:.95rem">Nghe lại</button>';
+    $('qSub').textContent='Nghe rồi chọn đúng hán tự';
+    $('again').onclick = () => say(w.hanzi); setTimeout(() => say(w.hanzi), 200);
+    const f=x=>x.icon+'  '+x.hanzi; render(shuffle([f(w),...o.map(f)]), f(w));
   }
 }
-$('genDialogueBtn').onclick = loadDialogue;
-loadDialogue();
+$('quizStart').onclick = nextQ; $('qNext').onclick = nextQ;
 
+// ---- Đoạn đối thoại ----
+let dIdx = -1, dLines = [];
+async function loadDialogue(){
+  dIdx = (dIdx + 1) % 6;   // luân phiên các bài
+  try{
+    const r = await (await fetch('/api/dialogue?q='+dIdx)).json();
+    dIdx = r.index; dLines = r.dialogue;
+    $('dTopic').textContent = 'Chủ đề: '+r.topic;
+    $('dList').innerHTML = dLines.map((l,i) =>
+      '<div class="d-item"><span class="d-badge">'+l.speaker+'</span><div class="d-box">'+
+      '<div class="d-zh">'+l.zh+' <button type="button" class="d-play" data-i="'+i+'">🔊</button></div>'+
+      '<div class="d-py">'+l.pinyin+'</div><div class="d-vi">'+l.vi+'</div></div></div>').join('');
+    document.querySelectorAll('.d-play').forEach(b => b.onclick = () => say(dLines[+b.dataset.i].zh));
+  }catch(e){ $('dList').textContent = 'Không tải được đoạn đối thoại.'; }
+}
+$('dNext').onclick = loadDialogue;
+$('dHide').onclick = () => { const h = $('dList').classList.toggle('hide'); $('dHide').textContent = h ? '👁 Hiện nghĩa' : '🙈 Ẩn nghĩa'; };
+$('dAll').onclick = async () => {
+  if(playing) return;
+  speechSynthesis.cancel(); playing = true; stopRequested = false; statusEl.textContent = 'Đang đọc đoạn hội thoại...';
+  for(const l of dLines){
+    if(stopRequested) break;
+    await speakOnce(l.zh, voices[+voiceEl.value]||null, +rateEl.value||1);
+    await new Promise(r => setTimeout(r, 500));
+  }
+  playing = false; statusEl.textContent = stopRequested ? 'Đã dừng.' : 'Hoàn tất!';
+};
+dIdx = -1; loadDialogue();
 </script></body></html>
 """
 
@@ -309,8 +656,12 @@ def main():
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--lan", action="store_true", help="cho điện thoại cùng Wi-Fi truy cập")
     a = ap.parse_args()
+    # Khi chạy trên hosting (Render...), dịch vụ đặt biến PORT -> mở cho mọi người truy cập
     host = "0.0.0.0" if (a.lan or "PORT" in os.environ) else "127.0.0.1"
     print(f"Mở trình duyệt: http://localhost:{a.port}")
+    if a.lan:
+        print(f"Điện thoại (cùng Wi-Fi): http://{socket.gethostbyname(socket.gethostname())}:{a.port}")
+    print("Nhấn Ctrl+C để tắt.")
     ThreadingHTTPServer((host, a.port), Handler).serve_forever()
 
 
