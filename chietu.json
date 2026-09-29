@@ -1,0 +1,59 @@
+{
+  "拿": {
+    "components": [
+      {
+        "comp": "合",
+        "pinyin": "hé",
+        "hanviet": "hợp",
+        "meaning": "đóng, khép"
+      },
+      {
+        "comp": "手",
+        "pinyin": "shǒu",
+        "hanviet": "thủ",
+        "meaning": "cái tay"
+      }
+    ],
+    "story": "Các ngón tay 手 mà khép lại hợp lại 合, đó là khi đang cầm nắm 拿."
+  },
+  "温": {
+    "components": [
+      {
+        "comp": "氵",
+        "pinyin": "shuǐ",
+        "hanviet": "thuỷ",
+        "meaning": "nước"
+      },
+      {
+        "comp": "皿",
+        "pinyin": "mǐn",
+        "hanviet": "mãnh",
+        "meaning": "cái bát"
+      },
+      {
+        "comp": "日",
+        "pinyin": "rì",
+        "hanviet": "nhật",
+        "meaning": "mặt trời"
+      }
+    ],
+    "story": "Nước 氵 cho vào bát 皿 rồi đem để dưới mặt trời 日 sẽ ấm 温 dần lên."
+  },
+  "天": {
+    "components": [
+      {
+        "comp": "一",
+        "pinyin": "yī",
+        "hanviet": "nhất",
+        "meaning": "một, một nét ngang"
+      },
+      {
+        "comp": "大",
+        "pinyin": "dà",
+        "hanviet": "đại",
+        "meaning": "to lớn, người dang tay"
+      }
+    ],
+    "story": "Người 大 dang rộng tay, phía trên đầu chỉ có một 一 khoảng không, đó chính là trời 天."
+  }
+}
