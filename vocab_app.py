@@ -1,5 +1,5 @@
 """
-Lặp Từ Vựng Tiếng Trung - chạy bằng Python, nâng cấp thêm Đoạn Đối Thoại 4-6 câu.
+Lặp Từ Vựng Tiếng Trung - chạy bằng Python, tích hợp Đoạn Đối Thoại 4-6 câu.
 """
 import argparse
 import json
@@ -32,7 +32,7 @@ SAMPLE_DIALOGUES = [
         "lines": [
             {"speaker": "A", "zh": "你好！很高兴认识你。", "vi": "Xin chào! Rất vui được quen biết bạn."},
             {"speaker": "B", "zh": "你好！我也很高兴认识你。", "vi": "Chào bạn! Tôi cũng rất vui được quen biết bạn."},
-            {"speaker": "A", "zh": "你今天 bận 吗？", "zh_full": "你 treasure 忙吗？", "zh": "你 today 忙吗？", "zh": "你今天忙吗？", "vi": "Hôm nay bạn có bận không?"},
+            {"speaker": "A", "zh": "你今天忙吗？", "vi": "Hôm nay bạn có bận không?"},
             {"speaker": "B", "zh": "我不忙，你呢？", "vi": "Tôi không bận, còn bạn thì sao?"},
             {"speaker": "A", "zh": "我们一起去喝茶吧！", "vi": "Chúng ta cùng đi uống trà nhé!"},
             {"speaker": "B", "zh": "太好了，我们走吧！", "vi": "Tốt quá, chúng ta đi thôi!"}
@@ -46,7 +46,7 @@ SAMPLE_DIALOGUES = [
             {"speaker": "A", "zh": "太好了，我想出去拿东西。", "vi": "Tốt quá, tôi muốn ra ngoài lấy đồ."},
             {"speaker": "B", "zh": "你看，外面天很蓝。", "vi": "Bạn xem, bên ngoài trời rất xanh."},
             {"speaker": "A", "zh": "那我们现在就出发吧。", "vi": "Vậy bây giờ chúng ta xuất phát thôi."},
-            {"speaker": "B", "zh": "好的，合手拿好钥匙。", "vi": "Được rồi, cầm chắc chìa khóa nhé."}
+            {"speaker": "B", "zh": "好的，拿好钥匙。", "vi": "Được rồi, cầm chắc chìa khóa nhé."}
         ]
     }
 ]
@@ -118,7 +118,6 @@ def translate(text):
 
 
 def generate_dialogue(words_str=""):
-    """Tạo hoặc lấy hội thoại 4-6 câu chứa các từ truyền vào hoặc chọn mẫu."""
     sample = random.choice(SAMPLE_DIALOGUES)
     res_lines = []
     for line in sample["lines"]:
@@ -158,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-PAGE = r"""<!DOCTYPE html>
+PAGE = """<!DOCTYPE html>
 <html lang="vi"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lặp Từ Vựng Tiếng Trung</title>
@@ -203,7 +202,6 @@ button.stop{padding:14px 18px;font-size:1rem;border-radius:10px;border:1px solid
 .vpinyin{color:var(--accent);font-family:monospace;margin-left:6px;font-size:.9rem}
 .vmeaning{color:var(--sub);font-size:.85rem;margin-top:2px}
 
-/* Style cho Đối thoại */
 .dialogue-item{display:flex;gap:10px;margin-bottom:12px;align-items:flex-start}
 .speaker-badge{background:var(--accent);color:var(--accent-ink);padding:4px 8px;border-radius:6px;font-weight:bold;font-size:.85rem}
 .dialogue-content{flex:1;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line)}
@@ -247,7 +245,6 @@ button.stop{padding:14px 18px;font-size:1rem;border-radius:10px;border:1px solid
   </div>
 </div>
 
-<!-- KHU VỰC ĐOẠN ĐỐI THOẠI 4-6 CÂU -->
 <div class="card">
   <label>💬 Đoạn đối thoại mẫu (4–6 câu)</label>
   <div id="dialogueTopic" style="font-weight:700;margin-bottom:12px;color:var(--accent)">Chủ đề: Luyện tập</div>
@@ -282,7 +279,6 @@ function speakOnce(text, voice, rate){
 }
 const say = t => { speechSynthesis.cancel(); speakOnce(t, voices[+voiceEl.value]||null, +rateEl.value||1); };
 
-// ---- Tải Đoạn đối thoại ----
 async function loadDialogue(){
   try{
     const r = await (await fetch('/api/dialogue')).json();
@@ -291,7 +287,7 @@ async function loadDialogue(){
       '<div class="dialogue-item">'+
         '<span class="speaker-badge">'+item.speaker+'</span>'+
         '<div class="dialogue-content">'+
-          '<div class="dialogue-zh">'+item.zh+' <button onclick="say(\''+item.zh+'\')" style="border:none;background:none;cursor:pointer">🔊</button></div>'+
+          '<div class="dialogue-zh">'+item.zh+' <button onclick="say(\''+item.zh.replace(/'/g, "\\'")+'\')" style="border:none;background:none;cursor:pointer">🔊</button></div>'+
           '<div class="dialogue-py">'+item.pinyin+'</div>'+
           '<div class="dialogue-vi">'+item.vi+'</div>'+
         '</div>'+
@@ -302,6 +298,21 @@ async function loadDialogue(){
   }
 }
 $('genDialogueBtn').onclick = loadDialogue;
-loadDialogue(); // Tải sẵn 1 bài khi mở web
+loadDialogue();
 
 </script></body></html>
+"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
+    ap.add_argument("--lan", action="store_true", help="cho điện thoại cùng Wi-Fi truy cập")
+    a = ap.parse_args()
+    host = "0.0.0.0" if (a.lan or "PORT" in os.environ) else "127.0.0.1"
+    print(f"Mở trình duyệt: http://localhost:{a.port}")
+    ThreadingHTTPServer((host, a.port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
